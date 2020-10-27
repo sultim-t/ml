@@ -13,28 +13,25 @@ USER_COUNT = 480189
 RATING_MIN = 5
 RATING_MAX = 5
 
-FACTOR_COUNT = 8  # K
+FACTOR_COUNT = 4  # K
+START_W = 1 / 10000000
+GRADIENT_MAX_ITER = 5
 
 
-def predict(instance, weights, V):
-    featureCount = instance.shape[0]
+def predict(instID, instances, weights, V):
+    featureCount = instances.shape[1]
     assert(weights.shape[0] == featureCount)
     assert(V.shape[1] == FACTOR_COUNT)
 
-    # calculating using Lemma 3.1
-    # https://www.csie.ntu.edu.tw/~b97053/paper/Rendle2010FM.pdf
-    s = 0
-
+    # look getMSEGradient for comments
+    s_predict = 0
     for f in range(FACTOR_COUNT):
-        s1 = s2 = 0
-        for i in range(featureCount):
-            p = V[i][f] * instance[i]
+        a = V[:, f].multiply(instances[instID, :].transpose())
+        s1 = a.sum()
+        s2 = a.multiply(a).sum()
+        s_predict += s1 * s1 - s2
 
-            s1 += p
-            s2 += p * p
-        s += s1 * s1 - s2
-
-    return np.dot(instance, weights) + 0.5 * s
+    return instances[instID, :].dot(weights[:, 0])[0, 0] + 0.5 * s_predict
 
 
 def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
@@ -48,7 +45,7 @@ def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
     y_avg = np.average(results)
 
     for i in range(instanceCount):
-        p = predict(instances[i], weights, V)
+        p = predict(i, instances, weights, V)
         y = results[i]
 
         if testRangeTuple[0] <= i <= testRangeTuple[1]:
@@ -70,7 +67,7 @@ def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
     sumTrain = 0
     sumTest = 0
     for i in range(instanceCount):
-        p = predict(instances[i], weights, V)
+        p = predict(i, instances, weights, V)
         y = results[i]
 
         if testRangeTuple[0] <= i <= testRangeTuple[1]:
@@ -88,14 +85,14 @@ def calcRMSETrainTest(instances, weights, V, results, testRangeTuple):
 
 # get MSE gradient for FM model
 # returns a tuple (weights gradient, V gradient)
-def getMSEGradient(instances, weights, V, results):
+def getMSEGradient(instanceID, instances, weights, V, results):
     instanceCount, featureCount = instances.shape
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
     assert(results.shape[0] == instanceCount)
 
-    w_R = np.ndarray(shape=(1, featureCount))
-    V_R = np.ndarray(shape=(featureCount, FACTOR_COUNT))
+    w_R = sparse.lil_matrix((featureCount, 1))
+    V_R = sparse.lil_matrix((featureCount, FACTOR_COUNT))
 
     sumsForFactor = []
 
@@ -110,67 +107,66 @@ def getMSEGradient(instances, weights, V, results):
             v_i = v_id // V.shape[1]
             v_f = v_id % V.shape[1]
 
-        for inst in range(instanceCount):
+        # for only one
+        for inst in range(instanceID, instanceID + 1):
             # get result
-            y = results[inst]
+            y = results[inst, 0]
 
             # calculate predicted result, using factorization
             # machine model equation
-            instance = instances[inst]
             s_predict = 0
             for f in range(FACTOR_COUNT):
                 # calculating using Lemma 3.1
-                s1 = s2 = 0
-                for i in range(featureCount):
-                    p = V[i][f] * instance[i]
-                    s1 += p
-                    s2 += p * p
+                # per element multiplication, i.e. V[_, f] * instances[inst, _]
+                a = V[:, f].multiply(instances[inst, :].transpose())
+                s1 = a.sum()
+                # sum of squared elements
+                s2 = a.multiply(a).sum()
+
                 s_predict += s1 * s1 - s2
                 # also, cache sums for calculating model's partial derivative
                 sumsForFactor.append(s1)
-            y_p = np.dot(instance, weights) + 0.5 * s_predict
-            y_deriv = 0
+            y_p = instances[inst, :].dot(weights[:, 0])[0, 0] + 0.5 * s_predict
 
             # calculate partial derivative for FM model (equation 4)
             if isW:
                 # if the variable is from weights
-                y_deriv = weights[derivativeId]
+                y_deriv = weights[derivativeId, 0]
             else:
                 # calculate derivative for a variable from V
-                y_deriv = instance[v_i] * sumsForFactor[v_f] - V[v_i][v_f] * instance[v_i] * instance[v_i]
+                y_deriv = instances[inst, v_i] * sumsForFactor[v_f] - V[v_i, v_f] * instances[inst, v_i] * instances[inst, v_i]
 
             s += (y - y_p) * (-1) * y_deriv
 
             sumsForFactor.clear()
 
-        deriv = 2 / instanceCount * s
+        # only one is used
+        # deriv = 2 / instanceCount * s
+        deriv = 2 * s
 
         if isW:
-            w_R[derivativeId] = deriv
+            w_R[derivativeId, 0] = deriv
         else:
-            V_R[v_i][v_f] = deriv
+            V_R[v_i, v_f] = deriv
 
-    return w_R, V_R
+    print("getMSEGradient done.")
+    return w_R.tocsr(), V_R.tocsr()
 
 
 def gradientDescent(allInstances, testRangeTuple, results):
-    maxIterations = 100
     instanceCount, featureCount = allInstances.shape
 
     # (1 x feature count)
-    weights_k = weights_prev = np.full(featureCount, 1)
+    weights_k = weights_prev = sparse.csr_matrix(np.full((featureCount, 1), START_W))
 
     # (feature count x factor count)
-    V_k = V_prev = sparse.csr_matrix(np.full((featureCount, FACTOR_COUNT), 1))
+    V_k = V_prev = sparse.csr_matrix(np.full((featureCount, FACTOR_COUNT), START_W))
 
-    for i in range(1, maxIterations + 1):
+    for i in range(1, GRADIENT_MAX_ITER + 1):
         lambda_i = 1 / i
-
         randId = utils.getRandomExcept(instanceCount, testRangeTuple)
-        instanceRand = np.ndarray([allInstances[randId]])
-        result = np.ndarray([results[randId]])
 
-        w_grad, V_grad = getMSEGradient(instanceRand, weights_k, V_k, result)
+        w_grad, V_grad = getMSEGradient(randId, allInstances, weights_k, V_k, results)
 
         weights_k = weights_prev - lambda_i * w_grad
         V_k = V_prev - lambda_i * V_grad
@@ -194,18 +190,18 @@ def main():
 
     resultTable = pd.DataFrame(
         columns=[],
-        index=["R^2", "RMSE", "R^2-train", "RMSE-train"] +
-              ["w" + str(i) for i in range(featureCount)] +
-              ["V" + str(i) + str(j) for i in range(featureCount) for j in range(FACTOR_COUNT)]
+        index=["R^2", "RMSE", "R^2-train", "RMSE-train"]  # +
+              # ["w" + str(i) for i in range(featureCount)] +
+              # ["V" + str(i) + str(j) for i in range(featureCount) for j in range(FACTOR_COUNT)]
     )
 
     for i in range(foldCount):
         weights, V, r2, rmse, r2_tr, rmse_tr = gradientDescent(X, folds[i], ratings)
 
-        V = V.reshape((-1, 1))
+        #V = V.reshape((-1, 1))
 
-        resultTable.insert(i, "T" + str(i + 1), np.concatenate((
-                np.array([r2, rmse, r2_tr, rmse_tr]), weights, V)))
+        resultTable.insert(i, "T" + str(i + 1), np.array([r2, rmse, r2_tr, rmse_tr]))
+            #np.concatenate((np.array([r2, rmse, r2_tr, rmse_tr]), weights, V)))
 
         print("Fold #" + str(i) + "R^2-train: " + str(r2_tr))
         print("Fold #" + str(i) + "RMSE-train: " + str(rmse_tr))
