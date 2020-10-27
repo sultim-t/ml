@@ -1,7 +1,7 @@
-import random
-
+import pandas as pd
 import numpy as np
 from scipy import sparse
+from math import sqrt
 
 import utils
 
@@ -37,37 +37,53 @@ def predict(instance, weights, V):
     return np.dot(instance, weights) + 0.5 * s
 
 
-def calcR2(instances, weights, V, results):
+def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
     instanceCount, featureCount = instances.shape
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
     assert(results.shape[0] == instanceCount)
 
-    a = b = 0
+    aTrain = bTrain = 0
+    aTest = bTest = 0
     y_avg = np.average(results)
 
     for i in range(instanceCount):
         p = predict(instances[i], weights, V)
         y = results[i]
-        a += pow(y - p, 2)
-        b += pow(y - y_avg, 2)
 
-    return 1 - a / b
+        if testRangeTuple[0] <= i <= testRangeTuple[1]:
+            aTest += pow(y - p, 2)
+            bTest += pow(y - y_avg, 2)
+        else:
+            aTrain += pow(y - p, 2)
+            bTrain += pow(y - y_avg, 2)
+
+    return 1 - aTrain / bTrain, 1 - aTest / bTest
 
 
-def calcMSE(instances, weights, V, results):
+def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
     instanceCount, featureCount = instances.shape
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
     assert(results.shape[0] == instanceCount)
 
-    s = 0
+    sumTrain = 0
+    sumTest = 0
     for i in range(instanceCount):
         p = predict(instances[i], weights, V)
         y = results[i]
-        s += pow(y - p, 2)
 
-    return 1 / instanceCount * s
+        if testRangeTuple[0] <= i <= testRangeTuple[1]:
+            sumTest += pow(y - p, 2)
+        else:
+            sumTrain += pow(y - p, 2)
+
+    return 1 / instanceCount * sumTrain, 1 / instanceCount * sumTest
+
+
+def calcRMSETrainTest(instances, weights, V, results, testRangeTuple):
+    tr, ts = calcMSETrainTest(instances, weights, V, results, testRangeTuple)
+    return sqrt(tr), sqrt(ts)
 
 
 # get MSE gradient for FM model
@@ -137,39 +153,71 @@ def getMSEGradient(instances, weights, V, results):
     return w_R, V_R
 
 
-def gradientDescent(allInstances, trainIndices, testIndices, results):
+def gradientDescent(allInstances, testRangeTuple, results):
     maxIterations = 100
-    _, featureCount = allInstances.shape
+    instanceCount, featureCount = allInstances.shape
 
     # (1 x feature count)
     weights_k = weights_prev = np.full(featureCount, 1)
 
     # (feature count x factor count)
-    V_k = V_prev = sparse.csr_matrix(np.full((featureCount, FACTOR_COUNT)))
+    V_k = V_prev = sparse.csr_matrix(np.full((featureCount, FACTOR_COUNT), 1))
 
     for i in range(1, maxIterations + 1):
         lambda_i = 1 / i
 
-        randId = trainIndices[random.randint(0, len(trainIndices) - 1)]
+        randId = utils.getRandomExcept(instanceCount, testRangeTuple)
         instanceRand = np.ndarray([allInstances[randId]])
-        resultRand = np.ndarray([results[randId]])
+        result = np.ndarray([results[randId]])
 
-        w_grad, V_grad = getMSEGradient(instanceRand, weights_k, V_k, resultRand)
+        w_grad, V_grad = getMSEGradient(instanceRand, weights_k, V_k, result)
 
-        weights_k   = weights_prev  - lambda_i * w_grad
-        V_k         = V_prev        - lambda_i * V_grad
+        weights_k = weights_prev - lambda_i * w_grad
+        V_k = V_prev - lambda_i * V_grad
 
-    for i in testIndices:
-        instance = allInstances[i]
+    r2_train, r2_test = calcR2TrainTest(allInstances, weights_k, V_k, results, testRangeTuple)
+    rmse_train, rmse_test = calcRMSETrainTest(allInstances, weights_k, V_k, results, testRangeTuple)
 
+    return weights_k, V_k, r2_test, rmse_test, r2_train, rmse_train
 
 def main():
     # X is (number_of_ratings x (number_of_users + number_of_movie_ids))
     X, ratings = utils.getReadyData()
+    instanceCount, featureCount = X.shape
 
-    folds = [()]
+    foldCount = 5
+    folds = []
+    step = instanceCount // foldCount
+    for i in range(foldCount - 1):
+        folds.append((i * step, (i + 1) * step - 1))
+    folds.append(((foldCount - 1) * step, instanceCount - 1))
 
-    gradientDescent()
+    resultTable = pd.DataFrame(
+        columns=[],
+        index=["R^2", "RMSE", "R^2-train", "RMSE-train"] +
+              ["w" + str(i) for i in range(featureCount)] +
+              ["V" + str(i) + str(j) for i in range(featureCount) for j in range(FACTOR_COUNT)]
+    )
+
+    for i in range(foldCount):
+        weights, V, r2, rmse, r2_tr, rmse_tr = gradientDescent(X, folds[i], ratings)
+
+        V = V.reshape((-1, 1))
+
+        resultTable.insert(i, "T" + str(i + 1), np.concatenate((
+                np.array([r2, rmse, r2_tr, rmse_tr]), weights, V)))
+
+        print("Fold #" + str(i) + "R^2-train: " + str(r2_tr))
+        print("Fold #" + str(i) + "RMSE-train: " + str(rmse_tr))
+
+    e = resultTable.mean(axis=1)
+    std = resultTable.std(axis=1)
+    resultTable.insert(5, "E", e)
+    resultTable.insert(6, "STD", std)
+
+    print(resultTable.head())
+
+    resultTable.to_csv("out.csv")
 
 
 main()

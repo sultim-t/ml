@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
 from scipy.sparse import hstack, vstack, coo_matrix
 from sklearn.utils import shuffle
+import random
 
 def getData():
     #data_file_path = "./netflix-prize-data/processed_data.csv"
@@ -39,4 +40,14 @@ def getReadyData():
     # do shuffling so records will be evenly distributed over the matrix
     X, ratings = shuffle(X, ratings)
     return X, ratings
+
+
+def getRandomExcept(count, exceptThis):
+    # inclusive
+    a, b = exceptThis
+    r = random.randint(0, count - (b + 1 - a))
+    if r >= a:
+        # if r in [a,..] then shift to skip [a,b]
+        r += b + 1 - a
+    return r
 
