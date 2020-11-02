@@ -8,7 +8,7 @@ import utils
 
 
 FACTOR_COUNT = 2  # K
-GRADIENT_MAX_ITER = 5
+GRADIENT_MAX_ITER = 10
 MINIBATCH_SIZE = 1000
 
 
@@ -26,7 +26,7 @@ def getB1(instances, V):
     A2 = sqX * sqV
 
     # (first sum) - (second sum)
-    # A1 and A2 shape: (instance count, factor count)
+    # A0, A1 and A2 shape: (instance count, factor count)
     B1 = A1 - A2
 
     return A0, B1
@@ -112,7 +112,7 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
     assert(results.shape[0] == instanceCount)
     assert(len(instanceIDs) == MINIBATCH_SIZE)
 
-    w_R = sparse.lil_matrix((featureCount, 1))
+    #w_R = sparse.csr_matrix((featureCount, 1))
     V_R = sparse.lil_matrix((featureCount, FACTOR_COUNT))
 
     derivCount = weights.shape[0] + V.shape[0] + V.shape[1]
@@ -123,55 +123,50 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
 
     print_iter = 0
 
-    # get derivative over each variable in weights and V
-    for derivativeId in range(derivCount):
-        s = v_i = v_f = 0
-        tstart = time.time()
+    stime = time.time()
+    predicted = W1 + B1.sum(1) * 0.5
 
-        # if the variable is from weights
-        isW = derivativeId < weights.shape[0]
-        if not isW:
-            # decode i and f indices of V
-            v_id = derivativeId - weights.shape[0]
-            v_i = v_id // V.shape[1]
-            v_f = v_id % V.shape[1]
+    print("   predicted ", end='')
+    print(time.time() - stime)
+    stime = time.time()
 
-        if derivativeId == weights.shape[0]:
-            print("    Partial derivatives for w done.")
+    #for w_i in range(featureCount):
+        #s_wt = (np.multiply(results - predicted, ((-1) * instances[:, w_i]).toarray())).sum()
+    #reversed dims for +=
+    w_R = sparse.csr_matrix((1,featureCount))
+    for a in instanceIDs:
+        w_R += (results[a, 0] - predicted[a, 0]) * (instances[a, :])
+    w_R = 2.0 / len(instanceIDs) * w_R
+    w_R = w_R.transpose()
 
-        for instId in instanceIDs:  # range(instanceID, instanceID + 1):
+    print("    w_R ", end='')
+    print(time.time() - stime)
+    stime = time.time()
 
-            # calculate partial derivative for FM model (equation 4)
-            if isW:
-                # if the variable is from weights
-                y_deriv = weights[derivativeId, 0]
-            else:
-                # calculate derivative for a variable from V
-                y_deriv = instances[instId, v_i] * A0[instId, v_f] - V[v_i, v_f] * instances[instId, v_i] * instances[instId, v_i]
+    II = instances.multiply(instances).transpose()
 
-            if y_deriv == 0:
-                continue
+    print("    II ", end='')
+    print(time.time() - stime)
+    stime = time.time()
 
-            predicted = W1[instId, 0] + B1[instId, :].sum() * 0.5
-            s += (results[instId, 0] - predicted) * (-1) * y_deriv
+    #for v_f in range(FACTOR_COUNT):
+    #    for v_i in range(featureCount):
+    #        ys_deriv = instances[:, v_i].multiply(A0[:, v_f]) - V[v_i, v_f] * II[:, v_i]  # * instances[:, v_i].multiply(instances[:, v_i])
+    #        s_v = np.multiply((results - predicted), ((-1) * ys_deriv).toarray()).sum()
+    #        V_R[v_i, v_f] = 2.0 / instanceCount * s_v
 
-        # deriv = 2 / instanceCount * s
-        deriv = 2.0 / len(instanceIDs) * s
+    for v_f in range(FACTOR_COUNT):
+        for a in instanceIDs:
+            #stime = time.time()
+            s = instances[a, :].transpose() * A0[a, v_f] - V[:, v_f].multiply(II[:, a])
+            V_R[:, v_f] = (results[a, 0] - predicted[a, 0]) * s
+            #print(time.time() - stime)
 
-        if isW:
-            w_R[derivativeId, 0] = deriv
-        else:
-            V_R[v_i, v_f] = deriv
 
-        if derivativeId % (derivCount // 5) == 0 or deriv != 0:
-            if print_iter < 3:
-                print_iter += 1
-                print("    Partial derivative #%i (=%f) done in %s" % (derivativeId, deriv, str(time.time() - tstart)))
-            elif print_iter == 3:
-                print_iter += 1
-                print("    .")
-            else:
-                print(".", end='')
+    V_R = 2.0 / len(instanceIDs) * V_R
+
+    print("    VFVI ", end='')
+    print(time.time() - stime)
 
     print("    Partial derivatives for V done.")
     print("getMSEGradient done.")
