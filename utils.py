@@ -7,6 +7,7 @@ import random
 
 def getData():
     #data_file_path = "./netflix-prize-data/processed_data.csv"
+    #data_file_path = "./netflix-prize-data/processed_data_4m.csv"
     data_file_path = "netflix-prize-data/small.txt"
 
     df = pd.read_csv(data_file_path, header=None, names=['UserId', 'Rating', 'MovieId'])
@@ -45,7 +46,7 @@ def getReadyData():
 def getRandomExcept(count, exceptThis):
     # inclusive
     a, b = exceptThis
-    r = random.randint(0, count - (b + 1 - a))
+    r = random.randint(0, count - (b + 1 - a) - 1)
     if r >= a:
         # if r in [a,..] then shift to skip [a,b]
         r += b + 1 - a
