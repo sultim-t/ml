@@ -7,8 +7,8 @@ import random
 
 def getData():
     #data_file_path = "./netflix-prize-data/processed_data.csv"
-    #data_file_path = "./netflix-prize-data/processed_data_4m.csv"
-    data_file_path = "netflix-prize-data/small.txt"
+    data_file_path = "./netflix-prize-data/processed_data_4m.csv"
+    #data_file_path = "netflix-prize-data/small.txt"
 
     df = pd.read_csv(data_file_path, header=None, names=['UserId', 'Rating', 'MovieId'])
     print(df.iloc[::5000000, :])

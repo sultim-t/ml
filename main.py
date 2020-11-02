@@ -7,47 +7,33 @@ from math import sqrt
 import utils
 
 
-FACTOR_COUNT = 3  # K
-GRADIENT_MAX_ITER = 10
-MINIBATCH_SIZE = 100
-
-
-def predict(instID, instances, weights, V):
-    featureCount = instances.shape[1]
-    assert(weights.shape[0] == featureCount)
-    assert(V.shape[1] == FACTOR_COUNT)
-
-    # look getMSEGradient for comments
-    s_predict = 0
-    for f in range(FACTOR_COUNT):
-        a = V[:, f].multiply(instances[instID, :].transpose())
-        s1 = a.sum()
-        s2 = a.multiply(a).sum()
-        s_predict += s1 * s1 - s2
-
-    return instances[instID, :].dot(weights[:, 0])[0, 0] + 0.5 * s_predict
+FACTOR_COUNT = 2  # K
+GRADIENT_MAX_ITER = 5
+MINIBATCH_SIZE = 1000
 
 
 def getB1(instances, V):
     # these 2 sums from lemma 3.1
     # (sum of [V_i,f * x_i])^2
-    A1 = instances * V
+    A0 = instances * V
     # point-wise multiplication, here it's getting square of each element
-    A1 = A1.multiply(A1)
+    A1 = A0.multiply(A0)
 
     # sum of [(V_i,f)^2 * (x_i)^2]
     sqV = V.multiply(V)
-    sqX = instances.multiply(instances)
+    #sqX = instances.multiply(instances)
+    sqX = instances  # there are only 0 and 1, no need for squaring
     A2 = sqX * sqV
 
     # (first sum) - (second sum)
     # A1 and A2 shape: (instance count, factor count)
     B1 = A1 - A2
-    return B1
+
+    return A0, B1
 
 
 def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
-    print("Calculating R2 for a train and test set...")
+    #print("Calculating R2 for a train and test set...")
     instanceCount, featureCount = instances.shape
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
@@ -63,11 +49,11 @@ def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
     else:
         yTrain_avg = (results[testRangeTuple[1]:, 0].mean() + results[:testRangeTuple[0], 0].mean()) * 0.5
 
-    B1 = getB1(instances, V)
+    A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
     for i in range(instanceCount):
-        p = W1[i, 0] + 0.5 * B1[i:].sum()
+        p = W1[i, 0] + B1[i, :].sum() * 0.5
 
         y = results[i, 0]
 
@@ -80,7 +66,7 @@ def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
 
     r2Train = 1 - aTrain / bTrain
     r2Test = 1 - aTest / bTest
-    print("    R^2 train: %f, R^2 test: %f", (r2Train, r2Test))
+    #print("    R^2 train: %f, R^2 test: %f" % (r2Train, r2Test))
     return r2Train, r2Test
 
 
@@ -93,11 +79,11 @@ def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
     sumTrain = 0
     sumTest = 0
 
-    B1 = getB1(instances, V)
+    A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
     for i in range(instanceCount):
-        p = W1[i, 0] + 0.5 * B1[i:].sum()
+        p = W1[i, 0] + B1[i, :].sum() * 0.5
         y = results[i, 0]
 
         if testRangeTuple[0] <= i <= testRangeTuple[1]:
@@ -109,11 +95,11 @@ def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
 
 
 def calcRMSETrainTest(instances, weights, V, results, testRangeTuple):
-    print("Calculating RMSE for a train and test set...")
+    #print("Calculating RMSE for a train and test set...")
     tr, ts = calcMSETrainTest(instances, weights, V, results, testRangeTuple)
     rmseTrain = sqrt(tr)
     rmseTest = sqrt(ts)
-    print("    RMSE train: %f, RMSE test: %f", (rmseTrain, rmseTest))
+    #print("    RMSE train: %f, RMSE test: %f" % (rmseTrain, rmseTest))
     return rmseTrain, rmseTest
 
 
@@ -132,22 +118,10 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
     derivCount = weights.shape[0] + V.shape[0] + V.shape[1]
     print("Partial derivative count: %i" % derivCount)
 
-    ys_predicted = []
-
-    # look getB1 for explanation
-    A0 = instances * V
-    A1 = A0.multiply(A0)
-    sqV = V.multiply(V)
-    sqX = instances.multiply(instances)
-    A2 = sqX * sqV
-    B1 = A1 - A2
+    A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    # precalculate predicted results for given instances
-    ys_predicted = [
-        W1[instId, 0] + 0.5 * B1[instId:].sum()
-        for instId in instanceIDs
-    ]
+    print_iter = 0
 
     # get derivative over each variable in weights and V
     for derivativeId in range(derivCount):
@@ -165,7 +139,6 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
         if derivativeId == weights.shape[0]:
             print("    Partial derivatives for w done.")
 
-        instIter = 0
         for instId in instanceIDs:  # range(instanceID, instanceID + 1):
 
             # calculate partial derivative for FM model (equation 4)
@@ -176,8 +149,11 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
                 # calculate derivative for a variable from V
                 y_deriv = instances[instId, v_i] * A0[instId, v_f] - V[v_i, v_f] * instances[instId, v_i] * instances[instId, v_i]
 
-            s += (results[instId, 0] - ys_predicted[instIter]) * (-1) * y_deriv
-            instIter += 1
+            if y_deriv == 0:
+                continue
+
+            predicted = W1[instId, 0] + B1[instId, :].sum() * 0.5
+            s += (results[instId, 0] - predicted) * (-1) * y_deriv
 
         # deriv = 2 / instanceCount * s
         deriv = 2.0 / len(instanceIDs) * s
@@ -187,8 +163,15 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
         else:
             V_R[v_i, v_f] = deriv
 
-        if derivativeId % 100000 == 0:
-            print("    Partial derivative #%i done in %s" % (derivativeId, str(time.time() - tstart)))
+        if derivativeId % (derivCount // 5) == 0 or deriv != 0:
+            if print_iter < 3:
+                print_iter += 1
+                print("    Partial derivative #%i (=%f) done in %s" % (derivativeId, deriv, str(time.time() - tstart)))
+            elif print_iter == 3:
+                print_iter += 1
+                print("    .")
+            else:
+                print(".", end='')
 
     print("    Partial derivatives for V done.")
     print("getMSEGradient done.")
@@ -206,7 +189,7 @@ def gradientDescent(allInstances, testRangeTuple, results):
 
     for i in range(1, GRADIENT_MAX_ITER + 1):
         print("Gradient descent iteration #%i..." % i)
-        lambda_i = 1 / i
+        lambda_i = 0.4
 
         randIds = [utils.getRandomExcept(instanceCount, testRangeTuple) for _ in range(MINIBATCH_SIZE)]
 
@@ -253,8 +236,8 @@ def main():
         resultTable.insert(i, "T%i" % (i + 1), np.array([r2, rmse, r2_tr, rmse_tr]))
             #np.concatenate((np.array([r2, rmse, r2_tr, rmse_tr]), weights, V)))
 
-        print("Fold #%i R^2-train: %f" % (i + 1, r2_tr))
-        print("Fold #%i RMSE-train: %f" % (i + 1, rmse_tr))
+        print("Fold #%i  R^2-train: %f" % (i + 1, r2_tr))
+        print("Fold #%i RMSE-train: %f\n" % (i + 1, rmse_tr))
 
         #with open("T%i_w.npy" % i, 'wb') as f:
         #    sparse.save_npz(f, weights)
