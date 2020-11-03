@@ -11,7 +11,7 @@ def getData():
     #data_file_path = "netflix-prize-data/small.txt"
 
     df = pd.read_csv(data_file_path, header=None, names=['UserId', 'Rating', 'MovieId'])
-    print(df.iloc[::5000000, :])
+    #print(df.iloc[::5000000, :])
 
     instance_count, _ = df.shape
 
@@ -22,11 +22,11 @@ def getData():
 
     # (number_of_ratings x number_of_users)
     one_hot_user_matrix = encoder.fit_transform(np.asarray(df['UserId']).reshape(-1, 1))
-    print("One-hot user matrix shape: " + str(one_hot_user_matrix.shape))
+    #print("One-hot user matrix shape: " + str(one_hot_user_matrix.shape))
 
     # (number_of_ratings x number_of_movie_ids)
     one_hot_movie_matrix = encoder.fit_transform(np.asarray(df['MovieId']).reshape(-1, 1))
-    print("One-hot movie matrix shape: " + str(one_hot_movie_matrix.shape))
+    #print("One-hot movie matrix shape: " + str(one_hot_movie_matrix.shape))
 
     # train data in CSR format
     X = hstack([ones_column, one_hot_user_matrix, one_hot_movie_matrix]).tocsr()
