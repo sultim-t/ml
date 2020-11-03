@@ -1,4 +1,5 @@
 import time
+import datetime
 import pandas as pd
 import numpy as np
 from scipy import sparse
@@ -33,41 +34,60 @@ def getB1(instances, V):
 
 
 def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
-    #print("Calculating R2 for a train and test set...")
     instanceCount, featureCount = instances.shape
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
     assert(results.shape[0] == instanceCount)
-
-    aTrain = bTrain = 0
-    aTest = bTest = 0
-    yTest_avg = results[testRangeTuple[0]:testRangeTuple[1], 0].mean()
-    if testRangeTuple[0] == 0:
-        yTrain_avg = results[testRangeTuple[1]:, 0].mean()
-    elif testRangeTuple[1] == instanceCount:
-        yTrain_avg = results[:testRangeTuple[0], 0].mean()
-    else:
-        yTrain_avg = (results[testRangeTuple[1]:, 0].mean() + results[:testRangeTuple[0], 0].mean()) * 0.5
+    ta = testRangeTuple[0]
+    tb = testRangeTuple[1]
 
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    for i in range(instanceCount):
-        p = W1[i, 0] + B1[i, :].sum() * 0.5
+    predicted = W1 + B1.sum(1) * 0.5
 
-        y = results[i, 0]
+    yTest_avg = results[ta:tb, 0].mean()
 
-        if testRangeTuple[0] <= i <= testRangeTuple[1]:
-            aTest += pow(y - p, 2)
-            bTest += pow(y - yTest_avg, 2)
-        else:
-            aTrain += pow(y - p, 2)
-            bTrain += pow(y - yTrain_avg, 2)
+    D0Test = results[ta:tb, 0] - predicted[ta:tb, 0]
+    aTest = D0Test.multiply(D0Test).sum()
+    D1Test = results[ta:tb, 0].todense() - yTest_avg
+    bTest = D1Test.multiply(D1Test).sum()
 
-    r2Train = 1 - aTrain / bTrain
-    r2Test = 1 - aTest / bTest
-    #print("    R^2 train: %f, R^2 test: %f" % (r2Train, r2Test))
-    return r2Train, r2Test
+    aTrain = bTrain = 0
+
+    # [ta, tb][train]
+    if ta == 0:
+        yTrain_avg = results[(tb + 1):, 0].mean()
+
+        D0Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
+        aTrain = D0Train.multiply(D0Train).sum()
+
+        D1Train = results[(tb + 1):, 0].todense() - yTrain_avg
+        bTrain = D1Train.multiply(D1Train).sum()
+
+    # [train][ta, tb]
+    elif tb == instanceCount:
+        yTrain_avg = results[:(ta - 1), 0].mean()
+
+        D0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
+        aTrain = D0Train.multiply(D0Train).sum()
+
+        D1Train = results[:(ta - 1), 0].todense() - yTrain_avg
+        bTrain = D1Train.multiply(D1Train).sum()
+
+    # [train][ta, tb][train]
+    else:
+        yTrain_avg = (results[(tb + 1):, 0].mean() + results[:(ta - 1), 0].mean()) * 0.5
+
+        D0_0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
+        D0_1Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
+        aTrain = D0_0Train.multiply(D0_0Train).sum() + D0_1Train.multiply(D0_1Train).sum()
+
+        D1_0Train = results[:(ta - 1), 0].todense() - yTrain_avg
+        D1_1Train = results[(tb + 1):, 0].todense() - yTrain_avg
+        bTrain = D1_0Train.multuply(D1_0Train).sum() + D1_1Train.multuply(D1_1Train).sum()
+
+    return 1 - aTrain / bTrain, 1 - aTest / bTest
 
 
 def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
@@ -75,32 +95,39 @@ def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
     assert(weights.shape[0] == featureCount == V.shape[0])
     assert(V.shape[1] == FACTOR_COUNT)
     assert(results.shape[0] == instanceCount)
-
-    sumTrain = 0
-    sumTest = 0
+    ta = testRangeTuple[0]
+    tb = testRangeTuple[1]
 
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    for i in range(instanceCount):
-        p = W1[i, 0] + B1[i, :].sum() * 0.5
-        y = results[i, 0]
+    predicted = W1 + B1.sum(1) * 0.5
 
-        if testRangeTuple[0] <= i <= testRangeTuple[1]:
-            sumTest += pow(y - p, 2)
-        else:
-            sumTrain += pow(y - p, 2)
+    D0Test = results[ta:tb, 0] - predicted[ta:tb, 0]
+    sumTest = D0Test.multiply(D0Test).sum()
+
+    # [ta, tb][train]
+    if ta == 0:
+        D0Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
+        sumTrain = D0Train.multiply(D0Train).sum()
+
+    # [train][ta, tb]
+    elif tb == instanceCount:
+        D0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
+        sumTrain = D0Train.multiply(D0Train).sum()
+
+    # [train][ta, tb][train]
+    else:
+        D0_0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
+        D0_1Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
+        sumTrain = D0_0Train.multiply(D0_0Train).sum() + D0_1Train.multiply(D0_1Train).sum()
 
     return 1 / instanceCount * sumTrain, 1 / instanceCount * sumTest
 
 
 def calcRMSETrainTest(instances, weights, V, results, testRangeTuple):
-    #print("Calculating RMSE for a train and test set...")
     tr, ts = calcMSETrainTest(instances, weights, V, results, testRangeTuple)
-    rmseTrain = sqrt(tr)
-    rmseTest = sqrt(ts)
-    #print("    RMSE train: %f, RMSE test: %f" % (rmseTrain, rmseTest))
-    return rmseTrain, rmseTest
+    return sqrt(tr), sqrt(ts)
 
 
 # get MSE gradient for FM model
@@ -112,49 +139,25 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
     assert(results.shape[0] == instanceCount)
     assert(len(instanceIDs) == MINIBATCH_SIZE)
 
-    #w_R = sparse.csr_matrix((featureCount, 1))
-    V_R = sparse.lil_matrix((featureCount, FACTOR_COUNT))
-
     derivCount = weights.shape[0] + V.shape[0] + V.shape[1]
     print("Partial derivative count: %i" % derivCount)
+    stime = time.time()
 
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    print_iter = 0
-
-    stime = time.time()
     predicted = W1 + B1.sum(1) * 0.5
 
-    print("   predicted ", end='')
-    print(time.time() - stime)
-    stime = time.time()
-
-    #for w_i in range(featureCount):
-        #s_wt = (np.multiply(results - predicted, ((-1) * instances[:, w_i]).toarray())).sum()
-    #reversed dims for +=
-    w_R = sparse.csr_matrix((1,featureCount))
+    # transposed for +=
+    w_R = sparse.csr_matrix((1, featureCount))
     for a in instanceIDs:
         w_R += (results[a, 0] - predicted[a, 0]) * (instances[a, :])
     w_R = 2.0 / len(instanceIDs) * w_R
     w_R = w_R.transpose()
 
-    print("    w_R ", end='')
-    print(time.time() - stime)
-    stime = time.time()
-
     II = instances.multiply(instances).transpose()
 
-    print("    II ", end='')
-    print(time.time() - stime)
-    stime = time.time()
-
-    #for v_f in range(FACTOR_COUNT):
-    #    for v_i in range(featureCount):
-    #        ys_deriv = instances[:, v_i].multiply(A0[:, v_f]) - V[v_i, v_f] * II[:, v_i]  # * instances[:, v_i].multiply(instances[:, v_i])
-    #        s_v = np.multiply((results - predicted), ((-1) * ys_deriv).toarray()).sum()
-    #        V_R[v_i, v_f] = 2.0 / instanceCount * s_v
-
+    V_R = sparse.lil_matrix((featureCount, FACTOR_COUNT))
     for v_f in range(FACTOR_COUNT):
         for a in instanceIDs:
             #stime = time.time()
@@ -162,14 +165,10 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
             V_R[:, v_f] = (results[a, 0] - predicted[a, 0]) * s
             #print(time.time() - stime)
 
-
     V_R = 2.0 / len(instanceIDs) * V_R
 
-    print("    VFVI ", end='')
-    print(time.time() - stime)
-
     print("    Partial derivatives for V done.")
-    print("getMSEGradient done.")
+    print("getMSEGradient done in %s sec." % str(time.time() - stime))
     return w_R.tocsr(), V_R.tocsr()
 
 
@@ -198,7 +197,10 @@ def gradientDescent(allInstances, testRangeTuple, results):
 
     return weights_k, V_k, r2_test, rmse_test, r2_train, rmse_train
 
+
 def main():
+    print(datetime.datetime)
+
     # X is (number_of_ratings x (number_of_users + number_of_movie_ids))
     X, ratings = utils.getReadyData()
     instanceCount, featureCount = X.shape
@@ -226,18 +228,10 @@ def main():
 
         weights, V, r2, rmse, r2_tr, rmse_tr = gradientDescent(X, folds[i], ratings)
 
-        #V = V.reshape((-1, 1))
-
         resultTable.insert(i, "T%i" % (i + 1), np.array([r2, rmse, r2_tr, rmse_tr]))
-            #np.concatenate((np.array([r2, rmse, r2_tr, rmse_tr]), weights, V)))
 
         print("Fold #%i  R^2-train: %f" % (i + 1, r2_tr))
         print("Fold #%i RMSE-train: %f\n" % (i + 1, rmse_tr))
-
-        #with open("T%i_w.npy" % i, 'wb') as f:
-        #    sparse.save_npz(f, weights)
-        #with open("T%i_V.npy" % i, 'wb') as f:
-        #    sparse.save_npz(f, V)
 
     e = resultTable.mean(axis=1)
     std = resultTable.std(axis=1)
