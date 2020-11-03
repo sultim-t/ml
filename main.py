@@ -183,7 +183,7 @@ def gradientDescent(allInstances, testRangeTuple, results):
 
     for i in range(1, GRADIENT_MAX_ITER + 1):
         print("    Gradient descent iteration #%i... " % i, end='')
-        lambda_i = 1 / i
+        lambda_i = 0.1 / i
 
         randIds = [utils.getRandomExcept(instanceCount, testRangeTuple) for _ in range(MINIBATCH_SIZE)]
 
