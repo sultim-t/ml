@@ -13,6 +13,7 @@ GRADIENT_MAX_ITER = 5
 MINIBATCH_SIZE = 1000
 ONES = sparse.csr_matrix((1, 1))
 
+
 def getB1(instances, V):
     # these 2 sums from lemma 3.1
     # (sum of [V_i,f * x_i])^2
@@ -22,7 +23,6 @@ def getB1(instances, V):
 
     # sum of [(V_i,f)^2 * (x_i)^2]
     sqV = V.multiply(V)
-    #sqX = instances.multiply(instances)
     sqX = instances  # there are only 0 and 1, no need for squaring
     A2 = sqX * sqV
 
@@ -183,7 +183,7 @@ def gradientDescent(allInstances, testRangeTuple, results):
 
     for i in range(1, GRADIENT_MAX_ITER + 1):
         print("    Gradient descent iteration #%i... " % i, end='')
-        lambda_i = 0.1 / i
+        lambda_i = 1 / i
 
         randIds = [utils.getRandomExcept(instanceCount, testRangeTuple) for _ in range(MINIBATCH_SIZE)]
 
@@ -249,5 +249,6 @@ def main():
     resultTable.to_csv("out.csv")
 
     print("Data saved:         %s" % str(datetime.datetime.now()))
+
 
 main()
