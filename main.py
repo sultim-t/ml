@@ -8,10 +8,10 @@ from math import sqrt
 import utils
 
 
-FACTOR_COUNT = 2  # K
+FACTOR_COUNT = 2
 GRADIENT_MAX_ITER = 5
 MINIBATCH_SIZE = 1000
-
+ONES = sparse.csr_matrix((1, 1))
 
 def getB1(instances, V):
     # these 2 sums from lemma 3.1
@@ -28,7 +28,9 @@ def getB1(instances, V):
 
     # (first sum) - (second sum)
     # A0, A1 and A2 shape: (instance count, factor count)
-    B1 = A1 - A2
+    B0 = A1 - A2
+    # sum rows
+    B1 = B0 * ONES
 
     return A0, B1
 
@@ -44,34 +46,35 @@ def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    predicted = W1 + B1.sum(1) * 0.5
+    predicted = W1 + B1 * 0.5
+    assert(predicted.shape[0] == instanceCount)
 
     yTest_avg = results[ta:tb, 0].mean()
 
     D0Test = results[ta:tb, 0] - predicted[ta:tb, 0]
-    aTest = np.multiply(D0Test, D0Test).sum()
-    D1Test = results[ta:tb, 0] - yTest_avg
-    bTest = np.multiply(D1Test, D1Test).sum()
+    aTest = D0Test.multiply(D0Test).sum()
+    D1Test = results[ta:tb, 0] - sparse.csr_matrix([yTest_avg for _ in range(tb - ta)]).transpose()
+    bTest = D1Test.multiply(D1Test).sum()
 
     # [ta, tb][train]
     if ta == 0:
         yTrain_avg = results[(tb + 1):, 0].mean()
 
         D0Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
-        aTrain = np.multiply(D0Train, D0Train).sum()
+        aTrain = D0Train.multiply(D0Train).sum()
 
-        D1Train = results[(tb + 1):, 0] - yTrain_avg
-        bTrain = np.multiply(D1Train, D1Train).sum()
+        D1Train = results[(tb + 1):, 0] - sparse.csr_matrix([yTrain_avg for _ in range(instanceCount - tb - 1)]).transpose()
+        bTrain = D1Train.multiply(D1Train).sum()
 
     # [train][ta, tb]
     elif tb == instanceCount - 1:
         yTrain_avg = results[:(ta - 1), 0].mean()
 
         D0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
-        aTrain = np.multiply(D0Train, D0Train).sum()
+        aTrain = D0Train.multiply(D0Train).sum()
 
-        D1Train = results[:(ta - 1), 0] - yTrain_avg
-        bTrain = np.multiply(D1Train, D1Train).sum()
+        D1Train = results[:(ta - 1), 0] - sparse.csr_matrix([yTrain_avg for _ in range(ta - 1)]).transpose()
+        bTrain = D1Train.multiply(D1Train).sum()
 
     # [train][ta, tb][train]
     else:
@@ -79,11 +82,11 @@ def calcR2TrainTest(instances, weights, V, results, testRangeTuple):
 
         D0_0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
         D0_1Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
-        aTrain = np.multiply(D0_0Train, D0_0Train).sum() + np.multiply(D0_1Train, D0_1Train).sum()
+        aTrain = D0_0Train.multiply(D0_0Train).sum() + D0_1Train.multiply(D0_1Train).sum()
 
-        D1_0Train = results[:(ta - 1), 0] - yTrain_avg
-        D1_1Train = results[(tb + 1):, 0] - yTrain_avg
-        bTrain = np.multiply(D1_0Train, D1_0Train).sum() + np.multiply(D1_1Train, D1_1Train).sum()
+        D1_0Train = results[:(ta - 1), 0] - sparse.csr_matrix([yTrain_avg for _ in range(ta - 1)]).transpose()
+        D1_1Train = results[(tb + 1):, 0] - sparse.csr_matrix([yTrain_avg for _ in range(instanceCount - tb - 1)]).transpose()
+        bTrain = D1_0Train.multiply(D1_0Train).sum() + D1_1Train.multiply(D1_1Train).sum()
 
     return 1 - aTrain / bTrain, 1 - aTest / bTest
 
@@ -99,26 +102,27 @@ def calcMSETrainTest(instances, weights, V, results, testRangeTuple):
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    predicted = W1 + B1.sum(1) * 0.5
+    predicted = W1 + B1 * 0.5
+    assert(predicted.shape[0] == instanceCount)
 
     D0Test = results[ta:tb, 0] - predicted[ta:tb, 0]
-    sumTest = np.multiply(D0Test, D0Test).sum()
+    sumTest = D0Test.multiply(D0Test).sum()
 
     # [ta, tb][train]
     if ta == 0:
         D0Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
-        sumTrain = np.multiply(D0Train, D0Train).sum()
+        sumTrain = D0Train.multiply(D0Train).sum()
 
     # [train][ta, tb]
     elif tb == instanceCount - 1:
         D0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
-        sumTrain = np.multiply(D0Train, D0Train).sum()
+        sumTrain = D0Train.multiply(D0Train).sum()
 
     # [train][ta, tb][train]
     else:
         D0_0Train = results[:(ta - 1), 0] - predicted[:(ta - 1), 0]
         D0_1Train = results[(tb + 1):, 0] - predicted[(tb + 1):, 0]
-        sumTrain = np.multiply(D0_0Train, D0_0Train).sum() + np.multiply(D0_1Train, D0_1Train).sum()
+        sumTrain = D0_0Train.multiply(D0_0Train).sum() + D0_1Train.multiply(D0_1Train).sum()
 
     return 1 / instanceCount * sumTrain, 1 / instanceCount * sumTest
 
@@ -142,7 +146,8 @@ def getMSEGradient(instanceIDs, instances, weights, V, results):
     A0, B1 = getB1(instances, V)
     W1 = instances * weights
 
-    predicted = W1 + B1.sum(1) * 0.5
+    predicted = W1 + B1 * 0.5
+    assert(predicted.shape[0] == instanceCount)
 
     # transposed for +=
     w_R = sparse.csr_matrix((1, featureCount))
@@ -214,6 +219,9 @@ def main():
         columns=[],
         index=["R^2", "RMSE", "R^2-train", "RMSE-train"]
     )
+
+    global ONES
+    ONES = sparse.csr_matrix([1 for _ in range(FACTOR_COUNT)]).transpose()
 
     print("Loading done:       %s" % str(datetime.datetime.now()))
 

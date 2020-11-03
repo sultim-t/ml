@@ -1,13 +1,14 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
-from scipy.sparse import hstack, vstack, coo_matrix
+from scipy.sparse import hstack, vstack, coo_matrix, csr_matrix
 from sklearn.utils import shuffle
 import random
 
 def getData():
     #data_file_path = "./netflix-prize-data/processed_data.csv"
     data_file_path = "./netflix-prize-data/processed_data_4m.csv"
+    #data_file_path = "./netflix-prize-data/aa.csv"
     #data_file_path = "netflix-prize-data/small.txt"
 
     df = pd.read_csv(data_file_path, header=None, names=['UserId', 'Rating', 'MovieId'])
@@ -31,7 +32,7 @@ def getData():
     # train data in CSR format
     X = hstack([ones_column, one_hot_user_matrix, one_hot_movie_matrix]).tocsr()
     # data to predict
-    ratings = np.asarray(df['Rating']).reshape(-1, 1)
+    ratings = csr_matrix(np.asarray(df['Rating']).reshape(-1, 1))
 
     return X, ratings
 
