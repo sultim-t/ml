@@ -136,7 +136,7 @@ def main():
                 for checkinId in checkins]
 
     accuracy = testCheckins(checkins, recommends)
-    print("Accuracy [0,1]:     %f%%" % (accuracy * 100))
+    print("Accuracy [0..100]:  %f%%" % (accuracy * 100))
 
     print("Done:               %s" % str(datetime.datetime.now()))
 
