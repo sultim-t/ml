@@ -1,15 +1,11 @@
 import datetime
-import pandas as pd
 import numpy as np
-from scipy import sparse
 import utils
 import random
 
 AP_MAX_ITERATIONS = 5
 # to control cluster size
-AP_S_KK = -5
-# 1 degree of longitude/latitude ~ 111 km
-POSITION_ANGLE_THRESHOLD = 0.2
+AP_S_KK = -20
 TEST_CHECKIN_COUNT = 100
 
 
@@ -25,8 +21,8 @@ def affinityPropagation(S):
 
     Ids = np.arange(N)
 
-    for iter in range(AP_MAX_ITERATIONS):
-        print("Iteration start:    %s" % str(datetime.datetime.now()))
+    for _ in range(AP_MAX_ITERATIONS):
+        print("  Iteration start:  %s" % str(datetime.datetime.now()))
         AS = A + S
 
         # find max without consideration of j=k
@@ -43,7 +39,7 @@ def affinityPropagation(S):
         # with other max
         R[Ids, amax] = S[Ids, amax] - M1
 
-        print("R:                  %s" % str(datetime.datetime.now()))
+        #print("  R:                %s" % str(datetime.datetime.now()))
 
         # availability
         M2 = np.maximum(R, 0)
@@ -55,25 +51,24 @@ def affinityPropagation(S):
             A[:, k] = R[k, k] + S2[k] - M2[:, k] - M2[k, k]
 
         A = np.minimum(A, 0)
-        print("A:                  %s" % str(datetime.datetime.now()))
+        #print("  A:                %s" % str(datetime.datetime.now()))
 
         # set diagonal elements
         # A[k,k]: sum over all j, but without j=k (i.e. diagonal)
         A.flat[::(N + 1)] = M2.sum(axis=0) - M2.diagonal()
-        print("A diagonal:         %s" % str(datetime.datetime.now()))
+        #print("  A diagonal:       %s" % str(datetime.datetime.now()))
 
     # argmax on each row
     return (A + R).argmax(axis=1)
 
 
 # find top recommendations for each cluster
-def findRecommendations(user2Cluster, clusterCount, users, locations):
+def findRecommendations(user2Cluster, clusters, users, locations):
     # dict (clusters) of dicts (count for each location)
-    rcmd = {i: {} for i in range(clusterCount)}
+    rcmd = {i: {} for i in clusters}
 
     for user, loc in zip(users, locations):
         c = user2Cluster[user]
-        assert(c not in rcmd)
 
         cr = rcmd[c]
         if loc in cr:
@@ -84,7 +79,7 @@ def findRecommendations(user2Cluster, clusterCount, users, locations):
             cr[loc] = 1
 
     # top 10 locations for each cluster
-    result = [None for _ in range(clusterCount)]
+    result = {}
 
     for clusterId, clusterDict in rcmd.items():
         # list of locationIds: firstly,
@@ -130,18 +125,18 @@ def main():
     users, locations = utils.getCheckins()
 
     # find top 10 location for each cluster
-    recommends = findRecommendations(user2Cluster, clusterCount, users, locations)
+    recommends = findRecommendations(user2Cluster, clusters, users, locations)
 
     # genereate test checkins
     checkins = [random.randint(0, len(users))
                 for _ in range(TEST_CHECKIN_COUNT)]
     checkins = [(users[checkinId],
-                 user2Cluster[checkinId],
+                 user2Cluster[users[checkinId]],
                  locations[checkinId])
                 for checkinId in checkins]
 
     accuracy = testCheckins(checkins, recommends)
-    print("Accuracy [0,1]:     %f" % accuracy)
+    print("Accuracy [0,1]:     %f%%" % (accuracy * 100))
 
     print("Done:               %s" % str(datetime.datetime.now()))
 

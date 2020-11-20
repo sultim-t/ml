@@ -29,6 +29,6 @@ def getCheckins():
     info = pd.read_csv(CHECKINS_DATA_FILE, delim_whitespace=True, header=None,
                        names=['UserID', 'Time', 'Latitude', 'Longitude', 'LocationID'])
 
-    users = np.asarray(info['UserID']).reshape(-1, 1)
-    locations = np.asarray(info['LocationID']).reshape(-1, 1)
+    users = np.asarray(info['UserID'])
+    locations = np.asarray(info['LocationID'])
     return users, locations
